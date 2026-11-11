@@ -27,11 +27,19 @@ arithmetic integrity, not the chat box.
 - No real/confidential data or object names. Ever.
 
 ## The domain (synthetic)
-Affiliate partnerships for a consumer savings site + browser extension. Two counterparties
-that get conflated: the **partner** (the network that reports the sale and pays) and the
-**merchant** (the retailer the shopper buys from). The same merchant is reachable through
-several partners at different rates. Metric chain: traffic in → clicks out → orders →
-commission → cost → gross profit.
+Affiliate partnerships for a consumer savings site + browser extension. Counterparties that
+get conflated: the **partner** (the affiliate network that reports the sale and pays
+commission) and the **merchant** (the retailer the shopper buys from). The same merchant is
+reachable through several partners at different rates. Metric chain: traffic in → clicks out →
+orders → commission → cost → gross profit.
+
+Like real publishers in this space (coupon/affiliate/rewards sites run both an affiliate
+program **and** on-site display advertising), there is a **second revenue engine**: on-site
+ads served through **ad partners** — a *different* taxonomy from the affiliate partner. Three
+tiers (`premium_managed`, `open_exchange`, `baseline_network`) are modeled on the real
+publisher-RPM spread, where a premium managed partner earns roughly 3–4× a bare ad network.
+eCPM is structured by partner tier × category demand, so the ad side carries genuine, queryable
+differences — and "top partner by commission" vs "top ad partner by RPM" are different answers.
 
 **property** is the native term and the #1 source of number disagreements: several consumer
 surfaces (regional sites, the extension, a secondary brand). Nearly every question
@@ -39,15 +47,17 @@ implicitly means one. There is a **named default property** (`us_main`).
 
 ## Governed views (the semantic layer)
 `REVENUE_SUMMARY`, `REVENUE_TRANSACTIONS`, `AD_SPEND`, `CLICKS`, `EFFECTIVE_CLICKS`,
-`PAGE_VIEWS`, `TRAFFIC_ANALYTICS`, `SEARCH_PERFORMANCE`, `RATE_BENCHMARKS`,
-`EMAIL_PERFORMANCE`. Four structural realism details are deliberate:
+`PAGE_VIEWS`, `AD_PERFORMANCE`, `TRAFFIC_ANALYTICS`, `SEARCH_PERFORMANCE`, `RATE_BENCHMARKS`,
+`EMAIL_PERFORMANCE`. Five structural realism details are deliberate:
 1. a **named default** (`property = us_main`) that must be applied explicitly — naming it in
    the layer does not auto-apply it to generated SQL;
 2. **two views at different grain over the same facts** (`REVENUE_SUMMARY` aggregate vs
    `REVENUE_TRANSACTIONS` transactional);
 3. joins happen **on merchant domain**;
 4. **cost is not pre-joined to revenue** (`AD_SPEND` sits at a different grain) — it must be
-   aggregated independently and then combined.
+   aggregated independently and then combined;
+5. **two "partner" dimensions** — the affiliate `partner` (revenue/commission views) and the
+   `ad_partner` (only in `AD_PERFORMANCE`) — that must never be conflated or grouped across.
 
 ## Guardrails (surfaced in the trace)
 - **Pre-aggregate each source independently, then combine. Never join two fact tables
@@ -56,6 +66,8 @@ implicitly means one. There is a **named default property** (`us_main`).
 - **A named filter in the layer does not auto-apply** to generated SQL.
 - **Compute in SQL, not in prose.**
 - **true gross profit = commission − revenue share cost.**
+- **`partner` ≠ `ad_partner`.** Commission/EPC "by partner" means the affiliate network; ad
+  metrics "by partner" mean the `ad_partner`. The agent must pick the one the metric belongs to.
 - Scope check + honest refusal; the three cashback terms (cashback click / cashback order /
   cashback conversion) deliberately **do not reconcile**, and the agent says so.
 

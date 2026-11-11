@@ -3,9 +3,11 @@
 
 Everything here is invented and seeded, so the whole warehouse rebuilds identically on every
 launch (no files to ship, no secrets). The shapes mirror a real partnerships semantic layer:
-a partner (the network that reports and pays) vs a merchant (the retailer), the same merchant
-reachable through several partners at different rates, a `property` dimension with a named
-default, and cost that lives at a different grain from revenue so it can't be row-joined.
+a partner (the affiliate network that reports and pays) vs a merchant (the retailer), the same
+merchant reachable through several partners at different rates, a separate `ad_partner` (the
+demand-side network that serves on-site display ads and pays us for them — a DIFFERENT taxonomy
+from the affiliate partner), a `property` dimension with a named default, and cost that lives at
+a different grain from revenue so it can't be row-joined.
 
 `build_database()` returns a DuckDB connection with the eleven governed base tables loaded.
 """
@@ -22,7 +24,7 @@ import pandas as pd
 SEED = 42
 # Bump whenever the schema changes (tables/columns). Deploys key their cached DB on this, so a
 # change always rebuilds the warehouse instead of reusing a stale cached file.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 N_DAYS = 90
 REFERENCE_DATE = dt.date(2026, 10, 31)  # the dataset's "today"; keeps relative dates stable
 START_DATE = REFERENCE_DATE - dt.timedelta(days=N_DAYS - 1)
@@ -46,6 +48,25 @@ CATEGORIES = {
     "beauty": (45.0, 0.100),
     "travel": (420.0, 0.030),
     "marketplace": (95.0, 0.050),
+}
+
+# Ad-monetization partners: the demand-side networks/SSPs that serve the on-site display ads
+# and pay us for them. DISTINCT from PARTNERS above (the affiliate networks that pay
+# commission). Modeled on the real publisher-RPM spread — a premium managed partner pays
+# roughly 3-4x a baseline network (published multi-niche studies put managed services around
+# $22-26 revenue-per-1,000 vs a bare ad network near $7), so "top partner by commission" and
+# "top ad partner by RPM" are deliberately DIFFERENT rankings.
+AD_PARTNERS = ["premium_managed", "open_exchange", "baseline_network"]
+AD_PARTNER_ECPM_BASE = {   # base effective revenue per 1,000 ad impressions ($), before category
+    "premium_managed": 11.0,
+    "open_exchange": 6.0,
+    "baseline_network": 3.0,
+}
+# Ad demand varies by content category (finance/insurance command the richest CPMs in reality;
+# among our categories electronics & travel are the premium ones, beauty & apparel the leanest).
+AD_CATEGORY_MULT = {
+    "electronics": 1.30, "travel": 1.25, "home": 1.00,
+    "marketplace": 0.95, "apparel": 0.80, "beauty": 0.75,
 }
 
 MERCHANT_NAMES = [
@@ -109,6 +130,23 @@ def _build_links(rng: random.Random, merchants) -> list[MerchantLink]:
     return links
 
 
+def _build_ad_allocations(rng: random.Random, merchants) -> dict[str, dict[str, float]]:
+    """Which ad partners serve each merchant's ad inventory, and the share each one gets.
+    Every merchant runs the always-on baseline network; most add the open exchange; the
+    premium managed partner is gated (in real life it needs scale), so it serves a subset.
+    Shares are normalized so splitting a merchant's impressions preserves the row total."""
+    alloc: dict[str, dict[str, float]] = {}
+    for m in merchants:
+        parts = {"baseline_network": rng.uniform(0.30, 0.60)}
+        if rng.random() < 0.65:
+            parts["open_exchange"] = rng.uniform(0.25, 0.50)
+        if rng.random() < 0.50:
+            parts["premium_managed"] = rng.uniform(0.20, 0.45)
+        total = sum(parts.values())
+        alloc[m["merchant_domain"]] = {k: v / total for k, v in parts.items()}
+    return alloc
+
+
 def _day_factor(d: dt.date, rng: random.Random) -> float:
     # mild weekly seasonality + gentle upward trend + noise
     weekday_boost = 1.12 if d.weekday() >= 5 else 1.0
@@ -122,6 +160,7 @@ def _generate():
     links = _build_links(rng, merchants)
     pop = {m["merchant_domain"]: m["popularity"] for m in merchants}
     aov_of = {m["merchant_domain"]: CATEGORIES[m["category"]][0] for m in merchants}
+    cat_of = {m["merchant_domain"]: m["category"] for m in merchants}
 
     clicks_rows, eff_rows, txn_rows = [], [], []
     # merchant/day/property accumulators for the independent tables
@@ -205,25 +244,45 @@ def _generate():
                         "page_views": int(round(clk * rng3.uniform(1.6, 3.4)))})
     page_views = pd.DataFrame(pv_rows)
 
-    # AD_PERFORMANCE: on-site display/native ads at merchant/day/property grain.
-    # Impressions scale off page views (several ad slots per page); ad_clicks via a small CTR;
-    # ad_revenue via an effective CPM. This is what powers impressions, CTR, eCPM, and RPM.
-    # ad_impressions here are AD impressions (distinct from SEARCH_PERFORMANCE.impressions),
-    # and ad_clicks are ad-unit clicks (NOT merchant clicks) — a deliberate naming trap.
+    # AD_PERFORMANCE: on-site display/native ads at merchant/day/property grain, now split
+    # across AD PARTNERS (the demand-side networks that serve the ads and pay us). Impressions
+    # scale off page views (several ad slots per page) and are split across the partners serving
+    # each merchant, preserving the row total; ad_clicks via a small display CTR; ad_revenue via
+    # a TIERED eCPM (partner tier x category demand x noise), so premium_managed earns a markedly
+    # higher eCPM/RPM than baseline_network — a real, teachable spread. ad_impressions here are
+    # AD impressions (distinct from SEARCH_PERFORMANCE.impressions), ad_clicks are ad-unit clicks
+    # (NOT merchant clicks), and ad_partner is a DIFFERENT taxonomy from the affiliate partner —
+    # all deliberate naming traps the agent must govern.
     rng7 = random.Random(SEED + 6)
+    ad_alloc = _build_ad_allocations(random.Random(SEED + 7), merchants)
     adperf_rows = []
     for r in pv_rows:
         pv = r["page_views"]
-        impressions = int(round(pv * rng7.uniform(1.4, 3.1)))  # ad slots per page view
-        if impressions <= 0:
+        merch = r["merchant_domain"]
+        total_impr = int(round(pv * rng7.uniform(1.4, 3.1)))  # ad slots per page view
+        if total_impr <= 0:
             continue
-        ad_clicks = int(round(impressions * rng7.uniform(0.004, 0.020)))  # display CTR
-        ecpm = rng7.uniform(2.0, 9.0)  # effective revenue per 1,000 impressions ($)
-        ad_revenue = round(impressions / 1000.0 * ecpm, 2)
-        adperf_rows.append({"date": r["date"], "property": r["property"],
-                            "merchant_domain": r["merchant_domain"],
-                            "ad_impressions": impressions, "ad_clicks": ad_clicks,
-                            "ad_revenue": ad_revenue})
+        cat = cat_of[merch]
+        alloc = ad_alloc[merch]
+        partners = list(alloc.keys())
+        # split the row's impressions across its ad partners, preserving the total exactly
+        raw = {p: total_impr * alloc[p] for p in partners}
+        impr = {p: int(math.floor(raw[p])) for p in partners}
+        remainder = total_impr - sum(impr.values())
+        for p in sorted(partners, key=lambda p: raw[p] - math.floor(raw[p]), reverse=True)[:remainder]:
+            impr[p] += 1
+        for p in partners:
+            ip = impr[p]
+            if ip <= 0:
+                continue
+            ad_clicks = int(round(ip * rng7.uniform(0.004, 0.020)))  # display CTR
+            # tiered effective revenue per 1,000 impressions: partner tier x category x noise
+            ecpm = AD_PARTNER_ECPM_BASE[p] * AD_CATEGORY_MULT[cat] * rng7.uniform(0.9, 1.1)
+            ad_revenue = round(ip / 1000.0 * ecpm, 2)
+            adperf_rows.append({"date": r["date"], "property": r["property"],
+                                "merchant_domain": merch, "ad_partner": p,
+                                "ad_impressions": ip, "ad_clicks": ad_clicks,
+                                "ad_revenue": ad_revenue})
     ad_performance = pd.DataFrame(adperf_rows)
 
     # TRAFFIC_ANALYTICS: property/day

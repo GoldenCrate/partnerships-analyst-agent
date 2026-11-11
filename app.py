@@ -27,7 +27,7 @@ EXAMPLES = [
     "RPM last 30 days",
     "ad impressions last 30 days",
     "ad CTR for shopmart last 30 days",
-    "eCPM last 30 days",
+    "eCPM by ad partner last 30 days",
     "top 5 merchants by commission last 30 days",
     "commission this month vs last month",
     "which partners should we drop?",
@@ -177,26 +177,19 @@ def _answer_offline(question: str, con) -> dict:
             "steps": [f"Offline: ran the locked canonical SQL for `{q['id']}`."]}
 
 
-def _handle(question: str) -> None:
+def _submit(question: str) -> None:
+    """Queue a user question and rerun. The answer is produced on the next run, so the
+    example chips and the first-run intro disappear the instant a question is asked."""
+    question = (question or "").strip()
+    if not question:
+        return
     st.session_state.setdefault("count", 0)
     if st.session_state["count"] >= MAX_QUESTIONS_PER_SESSION:
-        st.warning("Session question limit reached. Reload to start over.")
+        st.session_state["limit_hit"] = True
         return
     st.session_state["count"] += 1
-
-    st.session_state["messages"].append({"role": "user", "text": question})
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    con = _connect()
-    try:
-        with st.chat_message("assistant"):
-            llm = _get_llm()
-            entry = _answer_offline(question, con) if llm is None else _answer_live(question, con, llm)
-            _render_assistant(entry)
-    finally:
-        con.close()
-    st.session_state["messages"].append(entry)
+    st.session_state["messages"].append({"role": "user", "text": question, "answered": False})
+    st.rerun()
 
 
 # ---- layout ----------------------------------------------------------------------------
@@ -211,10 +204,11 @@ st.caption(
 with st.sidebar:
     st.header("About")
     st.markdown(
-        "- **Natural-language → SQL** over a governed semantic layer (partner vs merchant, a "
-        "`property` default, cost and impressions at their own grain).\n"
+        "- **Natural-language → SQL** over a governed semantic layer (affiliate `partner` vs "
+        "`ad_partner` vs merchant, a `property` default, cost and impressions at their own grain).\n"
         "- Covers **affiliate** metrics (commission, gross profit, EPC, conversion) **and ad** "
-        "metrics (impressions, CTR, CPC, eCPM, RPM).\n"
+        "metrics (impressions, CTR, CPC, eCPM, RPM) — the latter split across **ad partners** "
+        "(premium_managed / open_exchange / baseline_network) with very different eCPM.\n"
         "- It **explains and reconciles** — it does **not** recommend actions or forecast, and "
         "it refuses out-of-scope questions.\n"
         "- Answers **tie out** to trusted numbers on a set of golden questions.\n"
@@ -231,28 +225,44 @@ with st.sidebar:
         st.rerun()
 
 st.session_state.setdefault("messages", [])
+msgs = st.session_state["messages"]
 
-# Render the conversation so far.
-for m in st.session_state["messages"]:
-    if m["role"] == "user":
-        with st.chat_message("user"):
+# Render the conversation so far as one continuous thread.
+for m in msgs:
+    with st.chat_message(m["role"]):
+        if m["role"] == "user":
             st.markdown(m["text"])
-    else:
-        with st.chat_message("assistant"):
+        else:
             _render_assistant(m)
 
-# First-run suggestions (only before any conversation).
-pending = None
-if not st.session_state["messages"]:
-    st.markdown("**Try one of these, or type your own below:**")
+# If the last turn is a question we haven't answered yet, answer it now (streaming its
+# thinking live). It was appended on the previous run, so the chips are already gone.
+if msgs and msgs[-1]["role"] == "user" and not msgs[-1].get("answered"):
+    question = msgs[-1]["text"]
+    msgs[-1]["answered"] = True
+    con = _connect()
+    try:
+        with st.chat_message("assistant"):
+            llm = _get_llm()
+            entry = _answer_offline(question, con) if llm is None else _answer_live(question, con, llm)
+            _render_assistant(entry)
+    finally:
+        con.close()
+    msgs.append(entry)
+
+if st.session_state.pop("limit_hit", False):
+    st.warning("Session question limit reached — reload the page to start a new conversation.")
+
+# First-run suggestions: shown ONLY before the first question, then they disappear for good.
+if not msgs:
+    st.markdown("#### 👋 Try one of these — or type your own below")
+    st.caption("Pick a question to see the agent think through it. Then keep going: ask a "
+               "follow-up or dig deeper, and the conversation builds on itself.")
     cols = st.columns(2)
     for i, ex in enumerate(EXAMPLES):
         if cols[i % 2].button(ex, key=f"ex_{i}", width="stretch"):
-            pending = ex
+            _submit(ex)
 
-typed = st.chat_input("e.g. RPM by property last 30 days, or conversion rate for shopmart")
+typed = st.chat_input("Ask a follow-up or a new question — e.g. “now break that down by property”")
 if typed:
-    pending = typed
-
-if pending:
-    _handle(pending)
+    _submit(typed)

@@ -7,7 +7,13 @@ reference_date: "2026-10-31"   # the dataset's "today"; resolve all relative dat
 default_property: "us_main"    # the NAMED DEFAULT — see guardrails; it does NOT auto-apply
 
 glossary:
-  partner: "The affiliate network that reports the sale and pays us. NOT the retailer."
+  partner: "The affiliate network that reports the sale and pays us commission. NOT the retailer,
+    and NOT the ad_partner. This is the partner for revenue/commission/EPC questions."
+  ad_partner: "The demand-side ad network that serves our on-site display ads and pays us for
+    them (AD_PERFORMANCE.ad_partner). A DIFFERENT taxonomy from partner (the affiliate network):
+    tiers are premium_managed, open_exchange, baseline_network, with very different eCPM/RPM.
+    Use ad_partner for ad-revenue questions (impressions, CTR, eCPM, RPM); use partner for
+    commission. 'Top partner by commission' and 'top ad partner by RPM' are different answers."
   merchant: "The retailer the shopper buys from, keyed by merchant_domain. Reachable through
     several partners at different rates."
   property: "The consumer surface a number belongs to (regional site, the extension, a
@@ -50,6 +56,13 @@ guardrails:
   - id: compute_in_sql
     rule: "Do the arithmetic in SQL and return the computed number. Do not compute totals or
       ratios in prose from row values."
+  - id: partner_vs_ad_partner
+    rule: "`partner` (affiliate network, in REVENUE/CLICKS/EFFECTIVE_CLICKS/RATE_BENCHMARKS) and
+      `ad_partner` (demand-side ad network, only in AD_PERFORMANCE) are DIFFERENT dimensions.
+      Commission/EPC/revenue 'by partner' means the affiliate partner. Impressions/CTR/eCPM/RPM
+      'by partner' means the ad_partner. Never group ad metrics by `partner` or revenue by
+      `ad_partner`, and never equate the two — 'best partner' is ambiguous, so pick the one the
+      metric belongs to."
   - id: cashback_does_not_reconcile
     rule: "cashback click, cashback order, and cashback conversion are three different things
       with different denominators and deliberately do NOT reconcile. If a question says
@@ -114,14 +127,18 @@ views:
     description: "Merchant page views. 'views' = page_views."
     columns: {date: day, property: surface, merchant_domain: key, page_views: "page views"}
   AD_PERFORMANCE:
-    grain: "date x property x merchant_domain"
-    description: "On-site display/native ads. impressions here are AD impressions (NOT search
-      impressions). ad_clicks are ad-unit clicks, NOT merchant clicks. For impressions, CTR,
-      eCPM, RPM. Lives at a different grain from REVENUE (no partner) — do not row-join."
+    grain: "date x property x merchant_domain x ad_partner"
+    description: "On-site display/native ads, broken out by ad_partner (the demand-side network
+      serving the ads — premium_managed / open_exchange / baseline_network, with very different
+      eCPM). impressions here are AD impressions (NOT search impressions). ad_clicks are ad-unit
+      clicks, NOT merchant clicks. ad_partner is NOT the affiliate partner. For impressions, CTR,
+      eCPM, RPM, and 'by ad partner' questions. No affiliate partner / commission here, and the
+      grain differs from REVENUE — do not row-join to revenue."
     columns:
       date: day
       property: surface
       merchant_domain: key
+      ad_partner: "demand-side ad network (premium_managed / open_exchange / baseline_network); NOT the affiliate partner"
       ad_impressions: "ad impressions served"
       ad_clicks: "clicks on ad units (not merchant clicks)"
       ad_revenue: "ad revenue earned ($)"

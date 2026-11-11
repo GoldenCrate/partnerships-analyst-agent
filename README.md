@@ -4,8 +4,10 @@ A natural-language analytics agent for affiliate partnerships. Ask a plain-Engli
 in a chat and it writes DuckDB SQL against a **governed semantic layer**, runs it, and answers
 — and you **watch it think**, step by step (scope check → plan → the SQL it wrote → run →
 answer). It covers **affiliate** metrics (commission, gross profit, EPC, conversion, AOV) and
-**ad** metrics (impressions, CTR, CPC, eCPM, RPM). It **explains and reconciles — it does not
-recommend actions**, and it refuses out-of-scope questions.
+**ad** metrics (impressions, CTR, CPC, eCPM, RPM) — the ad side split across **ad partners**
+(`premium_managed` / `open_exchange` / `baseline_network`) with very different eCPM, the way a
+real publisher runs both an affiliate program and on-site display monetization. It **explains and
+reconciles — it does not recommend actions**, and it refuses out-of-scope questions.
 
 **Live demo:** https://partnerships-analyst-agent.streamlit.app
 
@@ -20,6 +22,12 @@ integrity. This agent is built around the mistakes that actually break these num
 - **`property` is a first-class dimension with a named default.** Most questions implicitly
   mean one surface; the agent applies the default (`us_main`) explicitly, because naming a
   default in the layer does *not* make it apply to generated SQL.
+- **Two different "partner" taxonomies.** The affiliate `partner` (pays commission) and the
+  `ad_partner` (serves display ads) are separate dimensions — "top partner by commission" and
+  "top ad partner by RPM" are different answers, and the layer forbids conflating them. The ad
+  partners also show the real eCPM-vs-RPM split: `premium_managed` leads on eCPM (per-impression
+  efficiency) while `baseline_network` leads on RPM (per-page-view yield, since it has the most
+  coverage).
 - **Cost lives at a different grain from revenue.** The agent never row-joins two fact tables
   and subtracts; it pre-aggregates each source independently, then combines.
 - **A filter applies to both sides of a ratio** (e.g. eCPC = ad_cost / effective_clicks).
@@ -37,7 +45,7 @@ question → scope-check → plan → text-to-SQL → execute (read-only) → na
                               DuckDB warehouse
 ```
 
-- `partnerships_agent/data_gen.py` — builds the synthetic warehouse (10 governed views) in
+- `partnerships_agent/data_gen.py` — builds the synthetic warehouse (11 governed views) in
   DuckDB, deterministically, on launch.
 - `partnerships_agent/semantic.yaml` — the governed layer: views, grains, metric formulas,
   and the guardrails the agent must follow.
@@ -54,7 +62,7 @@ runs without any key.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 22 tests, no API key needed
+pytest -q                                   # 28 tests, no API key needed
 export ANTHROPIC_API_KEY=sk-ant-...         # for live answers (Haiku; pennies)
 streamlit run app.py
 ```

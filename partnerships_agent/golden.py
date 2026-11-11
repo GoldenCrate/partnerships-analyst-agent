@@ -202,6 +202,36 @@ ANSWERABLE = [
         """,
     },
     {
+        "id": "ecpm_by_ad_partner_30d",
+        "question": "eCPM by ad partner last 30 days",
+        "note": "'by ad partner' -> group AD_PERFORMANCE by ad_partner (the demand-side network, "
+                "NOT the affiliate partner); premium_managed should lead. Default property.",
+        "sql": f"""
+            SELECT ad_partner, ROUND(1000.0 * SUM(ad_revenue) / SUM(ad_impressions), 4) AS ecpm
+            FROM AD_PERFORMANCE
+            WHERE property = 'us_main' AND {W30}
+            GROUP BY ad_partner ORDER BY ecpm DESC
+        """,
+    },
+    {
+        "id": "rpm_by_ad_partner_30d",
+        "question": "RPM by ad partner last 30 days",
+        "note": "RPM per ad_partner = 1000 * that partner's ad_revenue / total page views; "
+                "ad_revenue grouped by ad_partner (AD_PERFORMANCE) and page_views (PAGE_VIEWS) "
+                "aggregated independently, same property/window on both sides.",
+        "sql": f"""
+            WITH rev AS (
+                SELECT ad_partner, SUM(ad_revenue) AS r FROM AD_PERFORMANCE
+                WHERE property = 'us_main' AND {W30} GROUP BY ad_partner
+            ), pv AS (
+                SELECT SUM(page_views) AS v FROM PAGE_VIEWS
+                WHERE property = 'us_main' AND {W30}
+            )
+            SELECT rev.ad_partner, ROUND(1000.0 * rev.r / pv.v, 4) AS rpm
+            FROM rev, pv ORDER BY rpm DESC
+        """,
+    },
+    {
         "id": "cashback_orders_30d_default",
         "question": "orders from a cashback click last 30 days",
         "note": "looks-simple-isn't: answer cashback orders (is_cashback=true); note it won't reconcile to cashback clicks/conversion",

@@ -29,10 +29,16 @@ EXPECTED = {
     ],
     "realized_vs_benchmark_shopmart": [("partner_delta", 0.0414, 0.0424)],
     "revenue_this_vs_last_month": [(4805.41, 4201.33, 604.07)],
-    "impressions_30d_default": [(130442,)],
-    "ctr_merchant_30d": [(0.0114,)],
-    "ecpm_30d_default": [(5.4128,)],
-    "rpm_30d_default": [(12.15,)],
+    "impressions_30d_default": [(130848,)],
+    "ctr_merchant_30d": [(0.0123,)],
+    "ecpm_30d_default": [(4.7548,)],
+    "rpm_30d_default": [(10.7062,)],
+    "ecpm_by_ad_partner_30d": [
+        ("premium_managed", 11.1317), ("open_exchange", 6.3264), ("baseline_network", 3.1705),
+    ],
+    "rpm_by_ad_partner_30d": [
+        ("baseline_network", 4.7538), ("open_exchange", 3.1883), ("premium_managed", 2.7641),
+    ],
     "cashback_orders_30d_default": [(170,)],
 }
 
