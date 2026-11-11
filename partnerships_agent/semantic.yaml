@@ -19,6 +19,17 @@ glossary:
   cashback_click: "A click flagged as cashback (in CLICKS context)."
   cashback_order: "An order with is_cashback = true (in REVENUE_TRANSACTIONS)."
   cashback_conversion: "orders / clicks restricted to cashback. Different denominator."
+  views: "Merchant page views (PAGE_VIEWS.page_views). 'views' means page views."
+  ad_impressions: "On-site ad impressions (AD_PERFORMANCE). This is what 'impressions' means for
+    CTR/eCPM. Search impressions (SEARCH_PERFORMANCE.impressions) are a DIFFERENT thing — only
+    use those for SEO/search questions."
+  ad_click: "A click on an ad unit (AD_PERFORMANCE.ad_clicks). NOT a merchant click (CLICKS)."
+  CTR: "ad click-through rate = ad_clicks / ad_impressions (both from AD_PERFORMANCE)."
+  CPC: "cost per click = ad_cost / clicks (paid-media cost per merchant click). eCPC uses
+    effective_clicks instead."
+  eCPM: "effective revenue per 1,000 ad impressions = 1000 * ad_revenue / ad_impressions."
+  RPM: "revenue per 1,000 PAGE VIEWS = 1000 * ad_revenue / page_views. Per page view, not per
+    impression — RPM and eCPM have different denominators and will not match."
 
 guardrails:
   - id: named_default
@@ -33,7 +44,9 @@ guardrails:
       shared keys, or compute the ratio from the two scalars)."
   - id: filter_both_sides
     rule: "A filter applies to BOTH sides of a ratio. For eCPC = ad_cost / effective_clicks,
-      the same property and date window must filter AD_SPEND and EFFECTIVE_CLICKS."
+      the same property and date window must filter AD_SPEND and EFFECTIVE_CLICKS. Same for
+      CTR (ad_clicks / ad_impressions), CPC (ad_cost / clicks), and RPM (ad_revenue /
+      page_views) — filter every source the ratio touches identically."
   - id: compute_in_sql
     rule: "Do the arithmetic in SQL and return the computed number. Do not compute totals or
       ratios in prose from row values."
@@ -98,8 +111,20 @@ views:
       monetized_clicks: "effective clicks that earned"
   PAGE_VIEWS:
     grain: "date x property x merchant_domain"
-    description: "Merchant page views."
+    description: "Merchant page views. 'views' = page_views."
     columns: {date: day, property: surface, merchant_domain: key, page_views: "page views"}
+  AD_PERFORMANCE:
+    grain: "date x property x merchant_domain"
+    description: "On-site display/native ads. impressions here are AD impressions (NOT search
+      impressions). ad_clicks are ad-unit clicks, NOT merchant clicks. For impressions, CTR,
+      eCPM, RPM. Lives at a different grain from REVENUE (no partner) — do not row-join."
+    columns:
+      date: day
+      property: surface
+      merchant_domain: key
+      ad_impressions: "ad impressions served"
+      ad_clicks: "clicks on ad units (not merchant clicks)"
+      ad_revenue: "ad revenue earned ($)"
   TRAFFIC_ANALYTICS:
     grain: "date x property"
     description: "Site traffic in."
@@ -145,3 +170,8 @@ metrics:
   eCPC: "SUM(ad_cost) / SUM(effective_clicks)   [AD_SPEND + EFFECTIVE_CLICKS, independent]"
   realized_rate: "SUM(commission) / SUM(order_amount)   [REVENUE_SUMMARY]"
   CTOR: "SUM(email_clicks) / SUM(email_opens)   [EMAIL_PERFORMANCE]"
+  impressions: "SUM(ad_impressions)   [AD_PERFORMANCE]  (ad impressions, not search)"
+  CTR: "SUM(ad_clicks) / SUM(ad_impressions)   [AD_PERFORMANCE]"
+  CPC: "SUM(ad_cost) / SUM(clicks)   [AD_SPEND + CLICKS, aggregated independently]"
+  eCPM: "1000 * SUM(ad_revenue) / SUM(ad_impressions)   [AD_PERFORMANCE]"
+  RPM: "1000 * SUM(ad_revenue) / SUM(page_views)   [AD_PERFORMANCE + PAGE_VIEWS, independent]"

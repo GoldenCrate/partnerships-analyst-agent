@@ -1,9 +1,11 @@
 # Affiliate Partnerships Analyst
 
 A natural-language analytics agent for affiliate partnerships. Ask a plain-English question
-and it writes DuckDB SQL against a **governed semantic layer**, runs it, and shows you the
-answer, the table behind it, the SQL it wrote, and a short reasoning trace. It **explains and
-reconciles — it does not recommend actions**, and it refuses out-of-scope questions.
+in a chat and it writes DuckDB SQL against a **governed semantic layer**, runs it, and answers
+— and you **watch it think**, step by step (scope check → plan → the SQL it wrote → run →
+answer). It covers **affiliate** metrics (commission, gross profit, EPC, conversion, AOV) and
+**ad** metrics (impressions, CTR, CPC, eCPM, RPM). It **explains and reconciles — it does not
+recommend actions**, and it refuses out-of-scope questions.
 
 **Live demo:** https://partnerships-analyst-agent.streamlit.app
 

@@ -7,7 +7,7 @@ a partner (the network that reports and pays) vs a merchant (the retailer), the 
 reachable through several partners at different rates, a `property` dimension with a named
 default, and cost that lives at a different grain from revenue so it can't be row-joined.
 
-`build_database()` returns a DuckDB connection with the ten governed base tables loaded.
+`build_database()` returns a DuckDB connection with the eleven governed base tables loaded.
 """
 from __future__ import annotations
 
@@ -202,6 +202,27 @@ def _generate():
                         "page_views": int(round(clk * rng3.uniform(1.6, 3.4)))})
     page_views = pd.DataFrame(pv_rows)
 
+    # AD_PERFORMANCE: on-site display/native ads at merchant/day/property grain.
+    # Impressions scale off page views (several ad slots per page); ad_clicks via a small CTR;
+    # ad_revenue via an effective CPM. This is what powers impressions, CTR, eCPM, and RPM.
+    # ad_impressions here are AD impressions (distinct from SEARCH_PERFORMANCE.impressions),
+    # and ad_clicks are ad-unit clicks (NOT merchant clicks) — a deliberate naming trap.
+    rng7 = random.Random(SEED + 6)
+    adperf_rows = []
+    for r in pv_rows:
+        pv = r["page_views"]
+        impressions = int(round(pv * rng7.uniform(1.4, 3.1)))  # ad slots per page view
+        if impressions <= 0:
+            continue
+        ad_clicks = int(round(impressions * rng7.uniform(0.004, 0.020)))  # display CTR
+        ecpm = rng7.uniform(2.0, 9.0)  # effective revenue per 1,000 impressions ($)
+        ad_revenue = round(impressions / 1000.0 * ecpm, 2)
+        adperf_rows.append({"date": r["date"], "property": r["property"],
+                            "merchant_domain": r["merchant_domain"],
+                            "ad_impressions": impressions, "ad_clicks": ad_clicks,
+                            "ad_revenue": ad_revenue})
+    ad_performance = pd.DataFrame(adperf_rows)
+
     # TRAFFIC_ANALYTICS: property/day
     rng4 = random.Random(SEED + 3)
     traffic_rows = []
@@ -257,6 +278,7 @@ def _generate():
         "CLICKS": clicks,
         "EFFECTIVE_CLICKS": eff,
         "PAGE_VIEWS": page_views,
+        "AD_PERFORMANCE": ad_performance,
         "TRAFFIC_ANALYTICS": traffic,
         "SEARCH_PERFORMANCE": search,
         "RATE_BENCHMARKS": rate_benchmarks,

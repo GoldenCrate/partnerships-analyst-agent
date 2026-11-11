@@ -157,6 +157,51 @@ ANSWERABLE = [
         """,
     },
     {
+        "id": "impressions_30d_default",
+        "question": "ad impressions last 30 days",
+        "note": "ad impressions (AD_PERFORMANCE), not search impressions; default property",
+        "sql": f"""
+            SELECT SUM(ad_impressions) AS impressions
+            FROM AD_PERFORMANCE
+            WHERE property = 'us_main' AND {W30}
+        """,
+    },
+    {
+        "id": "ctr_merchant_30d",
+        "question": "ad CTR for shopmart last 30 days",
+        "note": "CTR = ad_clicks / ad_impressions (both AD_PERFORMANCE); filter both sides the same",
+        "sql": f"""
+            SELECT ROUND(SUM(ad_clicks) * 1.0 / SUM(ad_impressions), 4) AS ctr
+            FROM AD_PERFORMANCE
+            WHERE property = 'us_main' AND merchant_domain = 'shopmart.example' AND {W30}
+        """,
+    },
+    {
+        "id": "ecpm_30d_default",
+        "question": "eCPM last 30 days",
+        "note": "eCPM = 1000 * ad_revenue / ad_impressions (AD_PERFORMANCE); default property",
+        "sql": f"""
+            SELECT ROUND(1000.0 * SUM(ad_revenue) / SUM(ad_impressions), 4) AS ecpm
+            FROM AD_PERFORMANCE
+            WHERE property = 'us_main' AND {W30}
+        """,
+    },
+    {
+        "id": "rpm_30d_default",
+        "question": "RPM last 30 days",
+        "note": "RPM = 1000 * ad_revenue / page_views; two views (AD_PERFORMANCE + PAGE_VIEWS) aggregated independently, filter both sides",
+        "sql": f"""
+            WITH rev AS (
+                SELECT SUM(ad_revenue) AS r FROM AD_PERFORMANCE
+                WHERE property = 'us_main' AND {W30}
+            ), pv AS (
+                SELECT SUM(page_views) AS v FROM PAGE_VIEWS
+                WHERE property = 'us_main' AND {W30}
+            )
+            SELECT ROUND(1000.0 * rev.r / pv.v, 4) AS rpm FROM rev, pv
+        """,
+    },
+    {
         "id": "cashback_orders_30d_default",
         "question": "orders from a cashback click last 30 days",
         "note": "looks-simple-isn't: answer cashback orders (is_cashback=true); note it won't reconcile to cashback clicks/conversion",

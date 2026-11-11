@@ -75,7 +75,7 @@ class ScriptedLLM:
 class ClaudeLLM:
     """Live Claude client (Haiku). Cheap, fast; thinking left adaptive, text blocks extracted."""
 
-    def __init__(self, api_key: str | None = None, model: str = MODEL, max_tokens: int = 1024):
+    def __init__(self, api_key: str | None = None, model: str = MODEL, max_tokens: int = 2048):
         import anthropic
         self._client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self.model = model
@@ -175,8 +175,13 @@ class PartnershipsAgent:
         self.views = view_names(self.sem)
         self.max_rows = max_rows
 
-    def answer(self, question: str) -> AgentResult:
+    def answer(self, question: str, progress=None) -> AgentResult:
+        """Answer a question. If `progress` is given, it's called with short human-readable
+        strings as each stage completes, so a UI can show the agent 'thinking' live."""
+        _p = progress or (lambda *_: None)
         res = AgentResult(question=question)
+
+        _p("Reading the question and checking it's in scope, then planning the query…")
         plan = self.llm.json(self.system, _PLAN_TMPL.format(q=question))
 
         if not plan.get("in_scope", True) or plan.get("refusal_reason"):
@@ -185,24 +190,34 @@ class PartnershipsAgent:
             res.refusal_reason = reason
             res.answer = REFUSAL_TEXT.get(reason, REFUSAL_TEXT["in_scope_only"])
             res.trace = [f"Scope check: refused ({reason})."]
+            _p(f"Out of scope ({reason}) — declining and explaining why.")
             return res
 
         sql = (plan.get("sql") or "").strip()
+        _p("In scope. Validating the query is read-only and grounded in the governed views…")
         validate_sql(sql, self.views)
         res.plan = plan.get("plan")
         res.sql = sql
         res.caveat = plan.get("caveat")
 
+        guard = _guardrail_notes(sql)
+        _p(f"Plan: {res.plan}")
+        for g in guard:
+            _p(g)
+        _p(f"Wrote SQL:\n```sql\n{sql}\n```")
+
+        _p("Running the query against the warehouse…")
         cur = self.con.execute(sql)
         cols = [d[0] for d in cur.description]
         rows = cur.fetchall()[: self.max_rows]
         res.columns = cols
         res.rows = rows
+        _p(f"Query returned {len(rows)} row(s). Reconciling and writing the answer…")
 
         res.trace = [
             "Scope check: in scope.",
             f"Plan: {res.plan}",
-            *_guardrail_notes(sql),
+            *guard,
             f"SQL:\n{sql}",
             f"Executed: {len(rows)} row(s) returned.",
         ]

@@ -29,6 +29,10 @@ EXPECTED = {
     ],
     "realized_vs_benchmark_shopmart": [("partner_delta", 0.0414, 0.0424)],
     "revenue_this_vs_last_month": [(4805.41, 4201.33, 604.07)],
+    "impressions_30d_default": [(130442,)],
+    "ctr_merchant_30d": [(0.0114,)],
+    "ecpm_30d_default": [(5.4128,)],
+    "rpm_30d_default": [(12.15,)],
     "cashback_orders_30d_default": [(170,)],
 }
 
