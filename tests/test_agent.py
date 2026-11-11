@@ -47,6 +47,31 @@ def test_independent_aggregation_shows_in_trace(con):
     assert any("aggregated each source independently" in t for t in res.trace)
 
 
+def test_followup_history_is_injected_into_plan(con):
+    """A follow-up carries prior turns into the planning prompt so references resolve; a
+    question asked in isolation gets the plain prompt (no conversation block)."""
+    sql = _sql("rpm_by_ad_partner_30d")
+    plan = {"in_scope": True, "refusal_reason": None,
+            "plan": "RPM per ad_partner: ad_revenue by ad_partner over total page views.",
+            "sql": sql, "caveat": None}
+    llm = ScriptedLLM([plan, "RPM by ad partner on us_main: baseline_network leads."])
+    agent = PartnershipsAgent(con, llm)
+    res = agent.answer(
+        "now show RPM by ad partner for the same period",
+        history=[{"question": "eCPM by ad partner last 30 days",
+                  "answer": "eCPM was $11.13 for premium_managed over 2026-10-02 to 2026-10-31."}],
+    )
+    assert not res.refused
+    plan_prompt = llm.calls[0][1]                     # ("json", user_prompt)
+    assert "CONVERSATION SO FAR" in plan_prompt
+    assert "eCPM by ad partner last 30 days" in plan_prompt
+
+    # isolation: no history -> no conversation block
+    llm2 = ScriptedLLM([plan, "ok"])
+    PartnershipsAgent(con, llm2).answer("RPM by ad partner last 30 days")
+    assert "CONVERSATION SO FAR" not in llm2.calls[0][1]
+
+
 @pytest.mark.parametrize("r", REFUSALS, ids=lambda r: r["id"])
 def test_refusals(con, r):
     plan = {"in_scope": False, "refusal_reason": r["reason"], "plan": None, "sql": None}

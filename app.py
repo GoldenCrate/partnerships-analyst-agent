@@ -125,7 +125,22 @@ def _render_assistant(entry: dict) -> None:
 
 # ---- producing a new assistant turn ----------------------------------------------------
 
-def _answer_live(question: str, con, llm) -> dict:
+def _history_pairs(messages) -> list:
+    """Build [{question, answer}] pairs from stored turns so the agent can resolve follow-ups.
+    Keeps every prior question; drops the answer text of refusals/errors (unhelpful as context)."""
+    pairs = []
+    pending_q = None
+    for m in messages:
+        if m["role"] == "user":
+            pending_q = m["text"]
+        elif pending_q is not None:
+            ans = "" if m.get("refused") or m.get("mode") == "error" else m.get("answer", "")
+            pairs.append({"question": pending_q, "answer": ans})
+            pending_q = None
+    return pairs
+
+
+def _answer_live(question: str, con, llm, history=None) -> dict:
     """Run the agent, streaming its thinking into a live status box; return a stored entry."""
     steps: list[str] = []
     status = st.status("Thinking…", expanded=True)
@@ -136,7 +151,7 @@ def _answer_live(question: str, con, llm) -> dict:
 
     try:
         agent = PartnershipsAgent(con, llm)
-        res = agent.answer(question, progress=progress)
+        res = agent.answer(question, progress=progress, history=history)
     except SqlSafetyError as e:
         status.update(label="Blocked an unsafe query", state="error", expanded=False)
         return {"role": "assistant", "mode": "error",
@@ -240,11 +255,13 @@ for m in msgs:
 if msgs and msgs[-1]["role"] == "user" and not msgs[-1].get("answered"):
     question = msgs[-1]["text"]
     msgs[-1]["answered"] = True
+    history = _history_pairs(msgs[:-1])
     con = _connect()
     try:
         with st.chat_message("assistant"):
             llm = _get_llm()
-            entry = _answer_offline(question, con) if llm is None else _answer_live(question, con, llm)
+            entry = (_answer_offline(question, con) if llm is None
+                     else _answer_live(question, con, llm, history))
             _render_assistant(entry)
     finally:
         con.close()

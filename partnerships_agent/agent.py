@@ -175,14 +175,21 @@ class PartnershipsAgent:
         self.views = view_names(self.sem)
         self.max_rows = max_rows
 
-    def answer(self, question: str, progress=None) -> AgentResult:
+    def answer(self, question: str, progress=None, history=None) -> AgentResult:
         """Answer a question. If `progress` is given, it's called with short human-readable
-        strings as each stage completes, so a UI can show the agent 'thinking' live."""
+        strings as each stage completes, so a UI can show the agent 'thinking' live.
+
+        `history` is an optional list of prior turns ([{"question", "answer"}, ...], oldest
+        first) so follow-ups resolve against the conversation ("the same period", "break that
+        down by property"). Omitting it answers the question in isolation (tests do this)."""
         _p = progress or (lambda *_: None)
         res = AgentResult(question=question)
 
-        _p("Reading the question and checking it's in scope, then planning the query…")
-        plan = self.llm.json(self.system, _PLAN_TMPL.format(q=question))
+        convo = _history_block(history)
+        if convo:
+            _p("Reading the question in the context of the conversation so far…")
+        _p("Checking it's in scope, then planning the query…")
+        plan = self.llm.json(self.system, convo + _PLAN_TMPL.format(q=question))
 
         if not plan.get("in_scope", True) or plan.get("refusal_reason"):
             reason = plan.get("refusal_reason") or "in_scope_only"
@@ -228,6 +235,30 @@ class PartnershipsAgent:
         )
         res.answer = self.llm.text(self.system, narrate)
         return res
+
+
+def _history_block(history) -> str:
+    """Render recent turns as context so the planner can resolve follow-ups. Empty when there
+    is no history, so a question answered in isolation gets exactly the original prompt."""
+    if not history:
+        return ""
+    lines: list[str] = []
+    for h in history[-4:]:
+        q = (h.get("question") or "").strip()
+        a = " ".join((h.get("answer") or "").split())
+        if q:
+            lines.append(f"User asked: {q}")
+        if a:
+            lines.append(f"You answered: {a[:280]}")
+    if not lines:
+        return ""
+    return (
+        "CONVERSATION SO FAR (most recent last). The new question may be a FOLLOW-UP — resolve "
+        "references like 'the same period', 'that', 'those', 'break it down', or 'what about the "
+        "UK site' against it, and inherit the prior period / property / filters unless the new "
+        "question changes them. A follow-up about the same metrics is IN SCOPE.\n"
+        + "\n".join(lines) + "\n\n"
+    )
 
 
 def _guardrail_notes(sql: str) -> list[str]:
