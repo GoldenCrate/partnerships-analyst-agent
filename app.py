@@ -17,7 +17,7 @@ import duckdb
 import pandas as pd
 import streamlit as st
 
-from partnerships_agent.data_gen import build_database, REFERENCE_DATE
+from partnerships_agent.data_gen import build_database, REFERENCE_DATE, SCHEMA_VERSION
 from partnerships_agent.agent import PartnershipsAgent, ClaudeLLM, SqlSafetyError
 from partnerships_agent.golden import ANSWERABLE
 
@@ -37,8 +37,10 @@ st.set_page_config(page_title="Affiliate Partnerships Analyst", page_icon="📊"
 
 
 @st.cache_resource(show_spinner=False)
-def _db_path() -> str:
-    path = os.path.join(tempfile.gettempdir(), "partnerships_demo.duckdb")
+def _db_path(version: int) -> str:
+    # Filename and cache key both include the schema version, so a schema change rebuilds a
+    # fresh DB instead of reusing a stale cached file across a redeploy.
+    path = os.path.join(tempfile.gettempdir(), f"partnerships_demo_v{version}.duckdb")
     if os.path.exists(path):
         os.remove(path)
     con = build_database(path)
@@ -47,7 +49,7 @@ def _db_path() -> str:
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(_db_path(), read_only=True)
+    return duckdb.connect(_db_path(SCHEMA_VERSION), read_only=True)
 
 
 def _get_llm():

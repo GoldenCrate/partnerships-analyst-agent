@@ -20,6 +20,9 @@ import duckdb
 import pandas as pd
 
 SEED = 42
+# Bump whenever the schema changes (tables/columns). Deploys key their cached DB on this, so a
+# change always rebuilds the warehouse instead of reusing a stale cached file.
+SCHEMA_VERSION = 2
 N_DAYS = 90
 REFERENCE_DATE = dt.date(2026, 10, 31)  # the dataset's "today"; keeps relative dates stable
 START_DATE = REFERENCE_DATE - dt.timedelta(days=N_DAYS - 1)
