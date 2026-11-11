@@ -5,7 +5,7 @@ and it writes DuckDB SQL against a **governed semantic layer**, runs it, and sho
 answer, the table behind it, the SQL it wrote, and a short reasoning trace. It **explains and
 reconciles — it does not recommend actions**, and it refuses out-of-scope questions.
 
-**Live demo:** _(deploying — link to be added)_
+**Live demo:** https://partnerships-analyst-agent.streamlit.app
 
 > Everything here is **synthetic and de-branded**. It demonstrates a pattern (a governed
 > text-to-SQL agent) with invented data — no proprietary code, data, object names, or numbers.
