@@ -1,0 +1,147 @@
+# Governed semantic layer for the Affiliate Partnerships Analyst.
+# The agent reads this to understand the warehouse and the rules. It is the whole contract:
+# the agent writes SQL only against these views, using these metric definitions, obeying
+# these guardrails. (Synthetic/illustrative — no real object names, data, or numbers.)
+
+reference_date: "2026-10-31"   # the dataset's "today"; resolve all relative dates from here
+default_property: "us_main"    # the NAMED DEFAULT — see guardrails; it does NOT auto-apply
+
+glossary:
+  partner: "The affiliate network that reports the sale and pays us. NOT the retailer."
+  merchant: "The retailer the shopper buys from, keyed by merchant_domain. Reachable through
+    several partners at different rates."
+  property: "The consumer surface a number belongs to (regional site, the extension, a
+    secondary brand). The #1 source of number disagreements."
+  true_gross_profit: "commission - revenue_share_cost. 'gross profit' means this."
+  revenue_share_cost: "What we hand back to the shopper (mostly cashback). A cost, not revenue."
+  effective_clicks: "Clicks that were monetizable. A subset of clicks."
+  monetized_clicks: "Effective clicks that actually earned. A subset of effective_clicks."
+  cashback_click: "A click flagged as cashback (in CLICKS context)."
+  cashback_order: "An order with is_cashback = true (in REVENUE_TRANSACTIONS)."
+  cashback_conversion: "orders / clicks restricted to cashback. Different denominator."
+
+guardrails:
+  - id: named_default
+    rule: "A question that does not name a property means the default (us_main). You MUST add
+      `WHERE property = 'us_main'` yourself — naming the default in this layer does NOT make it
+      apply to your SQL. If the user names a property, filter to it instead. If the user asks
+      'by property' or 'across properties', group by property and do not filter."
+  - id: independent_aggregation
+    rule: "Never join two fact tables row-by-row and then subtract or divide. They sit at
+      different grains (e.g. AD_SPEND has no partner; REVENUE is per partner). Pre-aggregate
+      EACH source independently in its own CTE, then combine the aggregates (join on the
+      shared keys, or compute the ratio from the two scalars)."
+  - id: filter_both_sides
+    rule: "A filter applies to BOTH sides of a ratio. For eCPC = ad_cost / effective_clicks,
+      the same property and date window must filter AD_SPEND and EFFECTIVE_CLICKS."
+  - id: compute_in_sql
+    rule: "Do the arithmetic in SQL and return the computed number. Do not compute totals or
+      ratios in prose from row values."
+  - id: cashback_does_not_reconcile
+    rule: "cashback click, cashback order, and cashback conversion are three different things
+      with different denominators and deliberately do NOT reconcile. If a question says
+      'orders from a cashback click', state which one you are answering (cashback orders:
+      is_cashback = true in REVENUE_TRANSACTIONS) and note it will not tie to the others."
+  - id: explain_not_recommend
+    rule: "You explain and reconcile numbers. You do NOT recommend actions (which partners to
+      drop, what to do next). Refuse those."
+  - id: no_forecasting
+    rule: "You report on historical data only. Refuse forecasts, predictions, or projections."
+  - id: in_scope_only
+    rule: "Answer only partnerships-analytics questions about these views. Politely refuse
+      anything else."
+
+views:
+  REVENUE_SUMMARY:
+    grain: "date x property x partner x merchant_domain (aggregate)"
+    description: "Aggregated revenue facts. Use for totals/trends by partner, merchant, property."
+    columns:
+      date: "day"
+      property: "consumer surface"
+      partner: "paying network"
+      merchant_domain: "retailer key"
+      orders: "order count"
+      commission: "gross commission earned ($)"
+      revenue_share_cost: "cashback/share handed back to shopper ($)"
+      order_amount: "summed order value ($); AOV basis"
+      true_gross_profit: "commission - revenue_share_cost ($), precomputed per row"
+  REVENUE_TRANSACTIONS:
+    grain: "one row per order (transactional) — SAME facts as REVENUE_SUMMARY"
+    description: "Order-level detail. Use for AOV, cashback splits, per-order questions."
+    columns:
+      order_id: "unique order"
+      date: "day"
+      property: "consumer surface"
+      partner: "paying network"
+      merchant_domain: "retailer key"
+      order_amount: "order value ($)"
+      commission: "commission on this order ($)"
+      revenue_share_cost: "cashback/share on this order ($)"
+      is_cashback: "true if a cashback order"
+  AD_SPEND:
+    grain: "date x property x merchant_domain (NO partner)"
+    description: "Paid cost. Different grain from revenue — never row-join to revenue."
+    columns: {date: day, property: surface, merchant_domain: retailer key, ad_cost: "cost ($)"}
+  CLICKS:
+    grain: "date x property x merchant_domain x partner"
+    description: "Clicks out to merchants."
+    columns: {date: day, property: surface, merchant_domain: key, partner: network, clicks: "clicks out"}
+  EFFECTIVE_CLICKS:
+    grain: "date x property x merchant_domain x partner"
+    description: "Monetizable clicks. For eCPC, EPC, conversion."
+    columns:
+      date: day
+      property: surface
+      merchant_domain: key
+      partner: network
+      effective_clicks: "monetizable clicks"
+      monetized_clicks: "effective clicks that earned"
+  PAGE_VIEWS:
+    grain: "date x property x merchant_domain"
+    description: "Merchant page views."
+    columns: {date: day, property: surface, merchant_domain: key, page_views: "page views"}
+  TRAFFIC_ANALYTICS:
+    grain: "date x property"
+    description: "Site traffic in."
+    columns: {date: day, property: surface, sessions: sessions, visitors: visitors}
+  SEARCH_PERFORMANCE:
+    grain: "date x property x merchant_domain"
+    description: "Search console. search_clicks are NOT merchant clicks."
+    columns:
+      date: day
+      property: surface
+      merchant_domain: key
+      impressions: impressions
+      search_clicks: "clicks from search results (not merchant clicks)"
+      avg_position: "avg search position"
+  RATE_BENCHMARKS:
+    grain: "partner x merchant_domain"
+    description: "Published benchmark rates. Join on (partner, merchant_domain). Compare to
+      realized_rate = SUM(commission)/SUM(order_amount) from REVENUE_SUMMARY."
+    columns:
+      partner: network
+      merchant_domain: key
+      category: "merchant category"
+      commission_model: "CPA / CPC / CPL / flat_fee"
+      benchmark_rate: "published commission rate"
+  EMAIL_PERFORMANCE:
+    grain: "date x property"
+    description: "Email program. CTOR = email_clicks / email_opens. email_clicks are NOT
+      merchant clicks."
+    columns:
+      date: day
+      property: surface
+      emails_sent: sent
+      email_opens: opens
+      email_clicks: "clicks inside the email"
+      merchant_clicks: "clicks that reached a merchant"
+      orders_from_email: "orders attributed to email"
+
+metrics:
+  true_gross_profit: "SUM(commission) - SUM(revenue_share_cost)   [REVENUE_SUMMARY]"
+  AOV: "AVG(order_amount)   [REVENUE_TRANSACTIONS]"
+  CR: "SUM(orders) / SUM(clicks)   [REVENUE_SUMMARY + CLICKS, aggregated independently]"
+  EPC: "SUM(commission) / SUM(clicks)   [REVENUE_SUMMARY + CLICKS, independent]"
+  eCPC: "SUM(ad_cost) / SUM(effective_clicks)   [AD_SPEND + EFFECTIVE_CLICKS, independent]"
+  realized_rate: "SUM(commission) / SUM(order_amount)   [REVENUE_SUMMARY]"
+  CTOR: "SUM(email_clicks) / SUM(email_opens)   [EMAIL_PERFORMANCE]"
